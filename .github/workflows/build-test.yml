@@ -1,0 +1,74 @@
+name: Build and Bundle Test
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-bundle:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 9
+          run_install: false
+
+      - name: setup node
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: 'pnpm'
+
+      - name: install dependencies
+        run: pnpm install
+
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: rust cache
+        uses: swatinem/rust-cache@v2
+
+      - name: setup adb
+        run: .\scripts\setup_adb.ps1
+
+      - name: build tauri app
+        run: pnpm tauri build --no-bundle-sign
+
+      - name: verify bundled adb
+        shell: pwsh
+        run: |
+          # Find the generated installer
+          $installer = Get-ChildItem "target/release/bundle/nsis/*_x64-setup.exe" -ErrorAction Stop | Select-Object -First 1
+          Write-Host "Found installer: $($installer.FullName)"
+          
+          # Extract the installer to a temporary directory
+          Write-Host "Extracting installer..."
+          7z x $($installer.FullName) -oextracted_app
+          
+          # 1. Verify DLLs are present in the root directory (where the exe is)
+          Write-Host "Verifying DLL presence..."
+          $required_dlls = @("AdbWinApi.dll", "AdbWinUsbApi.dll")
+          foreach ($dll in $required_dlls) {
+              if (Test-Path "extracted_app/$dll") {
+                  Write-Host "✓ $dll found"
+              } else {
+                  throw "ERROR: $dll not found in bundled application root!"
+              }
+          }
+          
+          # 2. Verify ADB sidecar can execute
+          Write-Host "Verifying ADB execution..."
+          $adb_exe = Get-ChildItem "extracted_app/adb-*-pc-windows-msvc.exe" -ErrorAction Stop | Select-Object -First 1
+          Write-Host "Found sidecar: $($adb_exe.Name)"
+          
+          # Run adb version. If DLLs are missing, this will fail.
+          & $adb_exe.FullName version
+          if ($LASTEXITCODE -ne 0) {
+              throw "ERROR: Bundled ADB failed to execute! This usually means required DLLs are missing or inaccessible."
+          }
+          Write-Host "✓ ADB executed successfully!"
