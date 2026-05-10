@@ -14,10 +14,11 @@
     "externalBin": [
       "bin/adb"
     ],
-    "resources": [
-      "LICENSES/*",
-      "LICENSE"
-    ],
+    "resources": {
+      "LICENSES/*": "LICENSES/",
+      "LICENSE": "",
+      "bin/*.dll": ""
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
