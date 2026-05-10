@@ -1,9 +1,9 @@
 name: Build and Bundle Test
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev/0.1 ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev/0.1 ]
   workflow_dispatch:
 
 jobs:
@@ -37,7 +37,7 @@ jobs:
         run: .\scripts\setup_adb.ps1
 
       - name: build tauri app
-        run: pnpm tauri build --no-bundle-sign
+        run: pnpm tauri build --no-sign
 
       - name: verify bundled adb
         shell: pwsh
@@ -50,21 +50,22 @@ jobs:
           Write-Host "Extracting installer..."
           7z x $($installer.FullName) -oextracted_app
           
-          # 1. Verify DLLs are present in the root directory (where the exe is)
+          # 1. Verify DLLs are present (Searching recursively because NSIS often extracts to subdirs like $_OUTDIR)
           Write-Host "Verifying DLL presence..."
           $required_dlls = @("AdbWinApi.dll", "AdbWinUsbApi.dll")
           foreach ($dll in $required_dlls) {
-              if (Test-Path "extracted_app/$dll") {
-                  Write-Host "✓ $dll found"
+              $found = Get-ChildItem "extracted_app" -Filter $dll -Recurse | Select-Object -First 1
+              if ($found) {
+                  Write-Host "✓ $dll found at: $($found.FullName)"
               } else {
-                  throw "ERROR: $dll not found in bundled application root!"
+                  throw "ERROR: $dll not found in the extracted application!"
               }
           }
           
           # 2. Verify ADB sidecar can execute
           Write-Host "Verifying ADB execution..."
-          $adb_exe = Get-ChildItem "extracted_app/adb-*-pc-windows-msvc.exe" -ErrorAction Stop | Select-Object -First 1
-          Write-Host "Found sidecar: $($adb_exe.Name)"
+          $adb_exe = Get-ChildItem "extracted_app" -Filter "adb-*-pc-windows-msvc.exe" -Recurse -ErrorAction Stop | Select-Object -First 1
+          Write-Host "Found sidecar at: $($adb_exe.FullName)"
           
           # Run adb version. If DLLs are missing, this will fail.
           & $adb_exe.FullName version
