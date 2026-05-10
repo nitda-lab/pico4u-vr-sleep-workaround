@@ -64,7 +64,14 @@ jobs:
           
           # 2. Verify ADB sidecar can execute
           Write-Host "Verifying ADB execution..."
-          $adb_exe = Get-ChildItem "extracted_app" -Filter "adb-*-pc-windows-msvc.exe" -Recurse -ErrorAction Stop | Select-Object -First 1
+          $adb_exe = Get-ChildItem "extracted_app" -Filter "*adb*" -Recurse | Where-Object { $_.Name -like "*.exe" } | Select-Object -First 1
+          
+          if ($null -eq $adb_exe) {
+              Write-Host "ERROR: ADB executable not found! Listing all files in extracted_app for debugging:"
+              Get-ChildItem "extracted_app" -Recurse | Select-Object FullName
+              throw "ERROR: ADB executable not found in the extracted application!"
+          }
+          
           Write-Host "Found sidecar at: $($adb_exe.FullName)"
           
           # Run adb version. If DLLs are missing, this will fail.
