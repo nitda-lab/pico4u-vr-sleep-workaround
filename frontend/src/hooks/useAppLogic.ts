@@ -7,6 +7,15 @@ import { useTheme } from './useTheme'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const invokeWithTimeout = async <T>(cmd: string, args: any, timeoutMs: number): Promise<T> => {
+  return Promise.race([
+    invoke<T>(cmd, args),
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Command ${cmd} timed out after ${timeoutMs}ms`)), timeoutMs),
+    ),
+  ])
+}
+
 export function useAppLogic() {
   const { t, i18n } = useTranslation()
   const [logs, setLogs] = useState<string[]>([])
@@ -30,6 +39,8 @@ export function useAppLogic() {
   const [autoConnectStatus, setAutoConnectStatus] = useState<
     'idle' | 'connecting' | 'success' | 'failed' | 'skipped'
   >('idle')
+  const [autoConnectType, setAutoConnectType] = useState<'wired' | 'wireless' | null>(null)
+  const [autoConnectAttempt, setAutoConnectAttempt] = useState(1)
 
   const initialized = useRef(false)
 
@@ -54,6 +65,7 @@ export function useAppLogic() {
           dim_delay_hours: number
           ip_address: string
           keep_awake_interval_secs: number
+          last_connection_mode: 'wired' | 'wireless' | null
         }>('get_config')
 
         if (cancelled) return
@@ -66,38 +78,59 @@ export function useAppLogic() {
           setDeviceIp(savedIp)
         }
 
-        if (!savedIp || savedIp.trim() === '') {
+        const lastMode = config.last_connection_mode
+
+        // If no previous mode is saved, we don't auto-connect
+        if (!lastMode) {
           setAutoConnectStatus('skipped')
           return
         }
 
         setAutoConnectStatus('connecting')
+        setAutoConnectType(lastMode)
 
-        // Retry up to 3 times — the first call often bootstraps the ADB server
+        // Retry up to 3 times for either mode
         const maxRetries = 3
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          setAutoConnectAttempt(attempt)
           try {
-            await invoke<string>('try_auto_connect', { ip: savedIp })
+            // Use 10-second timeout for the whole operation (backend has 5s per command)
+            const res = await invokeWithTimeout<string>(
+              'try_auto_connect',
+              { mode: lastMode, ip: savedIp || '' },
+              10000,
+            )
+
             if (cancelled) return
 
-            // Success — go directly to wireless mode
-            setAutoConnectStatus('success')
-            setConnectionMode('wireless')
-            setIsConnected(true)
-            setDeviceIp(savedIp)
-            addLog(t('log_auto_connect_success', { ip: savedIp }))
-            return
-          } catch {
-            if (cancelled) return
-            if (attempt < maxRetries) {
-              await sleep(2000)
+            if (res === 'wired' || res === 'wireless') {
+              setConnectionMode(res as 'wired' | 'wireless')
+              setIsConnected(true)
+              setAutoConnectStatus('success')
+              if (res === 'wired') {
+                addLog(t('wired_status_success'))
+              } else {
+                addLog(t('log_auto_connect_success', { ip: savedIp }))
+              }
+              return
             }
+          } catch (e) {
+            console.warn(`${lastMode} auto-connect attempt ${attempt} failed:`, e)
+          }
+
+          if (cancelled) return
+          if (attempt < maxRetries) {
+            await sleep(2000)
           }
         }
 
         // All attempts failed
         setAutoConnectStatus('failed')
-        addLog(t('log_auto_connect_failed', { ip: savedIp }))
+        if (lastMode === 'wired') {
+          addLog(t('wired_status_error'))
+        } else {
+          addLog(t('log_auto_connect_failed', { ip: savedIp }))
+        }
       } catch (e) {
         console.error('Failed to init app:', e)
         if (!cancelled) setAutoConnectStatus('skipped')
@@ -107,27 +140,31 @@ export function useAppLogic() {
     initApp()
     return () => {
       cancelled = true
+      initialized.current = false
     }
-  }, [addLog, t])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const updateConfig = useCallback(
     async (newConfig: {
       dim_delay_hours?: number
       ip_address?: string
       keep_awake_interval_secs?: number
+      last_connection_mode?: 'wired' | 'wireless' | null
     }) => {
       try {
         const configToSave = {
           dim_delay_hours: newConfig.dim_delay_hours ?? dimAfterHours,
           ip_address: newConfig.ip_address ?? deviceIp,
           keep_awake_interval_secs: newConfig.keep_awake_interval_secs ?? keepAwakeInterval,
+          last_connection_mode: newConfig.last_connection_mode ?? connectionMode,
         }
         await invoke('save_config_cmd', { config: configToSave })
       } catch (e) {
         console.error('Failed to save config:', e)
       }
     },
-    [dimAfterHours, deviceIp, keepAwakeInterval],
+    [dimAfterHours, deviceIp, keepAwakeInterval, connectionMode],
   )
 
   const updateDimDelay = useCallback(
@@ -220,6 +257,7 @@ export function useAppLogic() {
     async (mode: 'wired' | 'wireless') => {
       setConnectionMode(mode)
       setIsConnected(false)
+      await updateConfig({ last_connection_mode: mode })
 
       if (mode === 'wired') {
         try {
@@ -340,24 +378,52 @@ export function useAppLogic() {
   }, [])
 
   const retryAutoConnect = useCallback(async () => {
-    if (!deviceIp || deviceIp.trim() === '') {
-      setAutoConnectStatus('skipped')
-      return
-    }
-
     setAutoConnectStatus('connecting')
 
     try {
-      await invoke<string>('try_auto_connect', { ip: deviceIp })
-      setAutoConnectStatus('success')
-      setConnectionMode('wireless')
-      setIsConnected(true)
-      addLog(t('log_auto_connect_success', { ip: deviceIp }))
-    } catch {
+      if (autoConnectType === 'wired') {
+        const res = await invokeWithTimeout<string>(
+          'try_auto_connect',
+          { mode: 'wired', ip: '' },
+          5000,
+        )
+        if (res === 'wired') {
+          setAutoConnectStatus('success')
+          setConnectionMode('wired')
+          setIsConnected(true)
+          addLog(t('wired_status_success'))
+        } else {
+          throw new Error('Wired detection failed')
+        }
+      } else {
+        if (!deviceIp || deviceIp.trim() === '') {
+          setAutoConnectStatus('skipped')
+          return
+        }
+        const res = await invokeWithTimeout<string>(
+          'try_auto_connect',
+          { mode: 'wireless', ip: deviceIp },
+          8000,
+        )
+        if (res === 'wireless') {
+          setAutoConnectStatus('success')
+          setConnectionMode('wireless')
+          setIsConnected(true)
+          addLog(t('log_auto_connect_success', { ip: deviceIp }))
+        } else {
+          throw new Error('Wireless connection failed')
+        }
+      }
+    } catch (e) {
+      console.error('Retry failed:', e)
       setAutoConnectStatus('failed')
-      addLog(t('log_auto_connect_failed', { ip: deviceIp }))
+      if (autoConnectType === 'wired') {
+        addLog(t('wired_status_error'))
+      } else {
+        addLog(t('log_auto_connect_failed', { ip: deviceIp }))
+      }
     }
-  }, [deviceIp, t, addLog])
+  }, [deviceIp, t, addLog, autoConnectType])
 
   return {
     t,
@@ -387,6 +453,8 @@ export function useAppLogic() {
     setTheme,
     autoConnectStatus,
     setAutoConnectStatus,
+    autoConnectType,
+    autoConnectAttempt,
     retryAutoConnect,
   }
 }
