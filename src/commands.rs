@@ -286,26 +286,52 @@ pub async fn stop_keep_awake(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn try_auto_connect(app: AppHandle, ip: String) -> Result<String, String> {
-    let connection_str = format_ip_address(&ip);
-
-    // Attempt adb connect
-    let connect_result =
-        run_adb_command(&app, &vec!["connect".to_string(), connection_str.clone()]).await;
-
-    match connect_result {
-        Ok(output) => {
-            // "already connected" or "connected to" means success
-            if output.contains("connected to") || output.contains("already connected") {
-                // Verify with adb devices
-                let devices = run_adb_command(&app, &vec!["devices".to_string()]).await?;
-                if devices.contains(&ip) && devices.contains("device") {
-                    return Ok(format!("connected to {}", connection_str));
-                }
+pub async fn try_auto_connect(app: AppHandle, mode: String, ip: String) -> Result<String, String> {
+    if mode == "wired" {
+        // Try to find a USB device
+        let res = run_adb_command(&app, &vec!["devices".to_string()]).await?;
+        let lines: Vec<&str> = res.lines().collect();
+        let has_wired = lines.iter().any(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("List of devices attached") {
+                return false;
             }
-            Err(format!("Connection failed: {}", output.trim()))
+            let parts: Vec<&str> = trimmed.split('\t').collect();
+            if parts.len() < 2 || parts[1] != "device" {
+                return false;
+            }
+            let id = parts[0];
+            !id.contains('.') && !id.contains(':')
+        });
+
+        if has_wired {
+            Ok("wired".to_string())
+        } else {
+            Err("No wired device found".to_string())
         }
-        Err(e) => Err(e),
+    } else if mode == "wireless" {
+        let connection_str = format_ip_address(&ip);
+
+        // Attempt adb connect
+        let connect_result =
+            run_adb_command(&app, &vec!["connect".to_string(), connection_str.clone()]).await;
+
+        match connect_result {
+            Ok(output) => {
+                // "already connected" or "connected to" means success
+                if output.contains("connected to") || output.contains("already connected") {
+                    // Verify with adb devices
+                    let devices = run_adb_command(&app, &vec!["devices".to_string()]).await?;
+                    if devices.contains(&ip) && devices.contains("device") {
+                        return Ok("wireless".to_string());
+                    }
+                }
+                Err(format!("Connection failed: {}", output.trim()))
+            }
+            Err(e) => Err(e),
+        }
+    } else {
+        Err("Invalid auto-connect mode".to_string())
     }
 }
 
