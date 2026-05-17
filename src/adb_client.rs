@@ -13,42 +13,46 @@ pub async fn run_adb_host_command(
     app: Option<&AppHandle>,
     command: &str,
 ) -> Result<String, String> {
-    let mut stream = connect_adb(app).await?;
+    timeout(TIMEOUT, async {
+        let mut stream = connect_adb(app).await?;
 
-    let req = format!("{:04x}{}", command.len(), command);
-    stream
-        .write_all(req.as_bytes())
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let mut status = [0u8; 4];
-    stream
-        .read_exact(&mut status)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if &status != b"OKAY" {
-        return Err("ADB server rejected request".to_string());
-    }
-
-    let mut len_buf = [0u8; 4];
-    if stream.read_exact(&mut len_buf).await.is_err() {
-        return Ok("".to_string());
-    }
-
-    let len_str = std::str::from_utf8(&len_buf).unwrap_or("0");
-    let len = usize::from_str_radix(len_str, 16).unwrap_or(0);
-
-    if len > 0 {
-        let mut data = vec![0u8; len];
+        let req = format!("{:04x}{}", command.len(), command);
         stream
-            .read_exact(&mut data)
+            .write_all(req.as_bytes())
             .await
             .map_err(|e| e.to_string())?;
-        Ok(String::from_utf8_lossy(&data).to_string())
-    } else {
-        Ok("".to_string())
-    }
+
+        let mut status = [0u8; 4];
+        stream
+            .read_exact(&mut status)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if &status != b"OKAY" {
+            return Err("ADB server rejected request".to_string());
+        }
+
+        let mut len_buf = [0u8; 4];
+        if stream.read_exact(&mut len_buf).await.is_err() {
+            return Ok("".to_string());
+        }
+
+        let len_str = std::str::from_utf8(&len_buf).unwrap_or("0");
+        let len = usize::from_str_radix(len_str, 16).unwrap_or(0);
+
+        if len > 0 {
+            let mut data = vec![0u8; len];
+            stream
+                .read_exact(&mut data)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(String::from_utf8_lossy(&data).to_string())
+        } else {
+            Ok("".to_string())
+        }
+    })
+    .await
+    .map_err(|_| "ADB host command timed out".to_string())?
 }
 
 pub async fn run_adb_device_command(
@@ -56,50 +60,54 @@ pub async fn run_adb_device_command(
     serial: Option<&str>,
     command: &str,
 ) -> Result<String, String> {
-    let mut stream = connect_adb(app).await?;
+    timeout(TIMEOUT, async {
+        let mut stream = connect_adb(app).await?;
 
-    let transport_req = if let Some(s) = serial {
-        format!("host:transport:{}", s)
-    } else {
-        "host:transport-any".to_string()
-    };
+        let transport_req = if let Some(s) = serial {
+            format!("host:transport:{}", s)
+        } else {
+            "host:transport-any".to_string()
+        };
 
-    let req = format!("{:04x}{}", transport_req.len(), transport_req);
-    stream
-        .write_all(req.as_bytes())
-        .await
-        .map_err(|e| e.to_string())?;
+        let req = format!("{:04x}{}", transport_req.len(), transport_req);
+        stream
+            .write_all(req.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
 
-    let mut status = [0u8; 4];
-    stream
-        .read_exact(&mut status)
-        .await
-        .map_err(|e| e.to_string())?;
-    if &status != b"OKAY" {
-        return Err("ADB server rejected transport. Is the device connected?".to_string());
-    }
+        let mut status = [0u8; 4];
+        stream
+            .read_exact(&mut status)
+            .await
+            .map_err(|e| e.to_string())?;
+        if &status != b"OKAY" {
+            return Err("ADB server rejected transport. Is the device connected?".to_string());
+        }
 
-    let req = format!("{:04x}{}", command.len(), command);
-    stream
-        .write_all(req.as_bytes())
-        .await
-        .map_err(|e| e.to_string())?;
+        let req = format!("{:04x}{}", command.len(), command);
+        stream
+            .write_all(req.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
 
-    stream
-        .read_exact(&mut status)
-        .await
-        .map_err(|e| e.to_string())?;
-    if &status != b"OKAY" {
-        return Err(format!("ADB server rejected device command '{}'", command));
-    }
+        stream
+            .read_exact(&mut status)
+            .await
+            .map_err(|e| e.to_string())?;
+        if &status != b"OKAY" {
+            return Err(format!("ADB server rejected device command '{}'", command));
+        }
 
-    let mut output = String::new();
-    stream
-        .read_to_string(&mut output)
-        .await
-        .map_err(|e| e.to_string())?;
+        let mut output = String::new();
+        stream
+            .read_to_string(&mut output)
+            .await
+            .map_err(|e| e.to_string())?;
 
-    Ok(output)
+        Ok(output)
+    })
+    .await
+    .map_err(|_| "ADB device command timed out".to_string())?
 }
 
 async fn connect_adb(app: Option<&AppHandle>) -> Result<TcpStream, String> {
