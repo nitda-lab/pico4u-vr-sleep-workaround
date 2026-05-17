@@ -1,5 +1,5 @@
 import { Button, TextField, DropdownSelector, DropdownMenuItem, Checkbox } from '@charcoal-ui/react'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useAppContext } from '../context/AppContext'
 
 export function Settings({ onClose }: { onClose?: () => void }) {
@@ -21,13 +21,6 @@ export function Settings({ onClose }: { onClose?: () => void }) {
   const [pendingTheme, setPendingTheme] = useState(theme)
   const [pendingDimAfterHours, setPendingDimAfterHours] = useState(dimAfterHours)
   const [pendingInterval, setPendingInterval] = useState(keepAwakeInterval)
-
-  useEffect(() => {
-    setPendingLanguage(i18n.language)
-    setPendingTheme(theme)
-    setPendingDimAfterHours(dimAfterHours)
-    setPendingInterval(keepAwakeInterval)
-  }, [i18n.language, theme, dimAfterHours, keepAwakeInterval])
 
   const handleApply = async () => {
     if (pendingLanguage !== i18n.language) {
