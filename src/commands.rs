@@ -1,32 +1,63 @@
+use crate::adb_client::{run_adb_device_command, run_adb_host_command};
 use crate::config::{AppConfig, load_config, save_config};
 use crate::state::AppState;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, State};
-use tauri_plugin_shell::ShellExt;
 use tokio::time::{Duration, interval, sleep};
 
-// Helper to run ADB command via Sidecar
 async fn run_adb_command(app: &AppHandle, args: &[String]) -> Result<String, String> {
-    let command = app
-        .shell()
-        .sidecar("adb")
-        .map_err(|e| format!("Sidecar configuration error: {}", e))?;
+    if args.is_empty() {
+        return Err("No ADB command provided".to_string());
+    }
 
-    let output = command
-        .args(args)
-        .output()
-        .await
-        .map_err(|e| format!("Failed to execute ADB command: {}", e))?;
-
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.is_empty() {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
-        } else {
-            Err(stderr.to_string())
+    match args[0].as_str() {
+        "devices" => run_adb_host_command(Some(app), "host:devices").await,
+        "connect" if args.len() > 1 => {
+            run_adb_host_command(Some(app), &format!("host:connect:{}", args[1])).await
         }
+        "disconnect" => run_adb_host_command(Some(app), "host:disconnect:").await,
+        "tcpip" if args.len() > 1 => {
+            run_adb_device_command(Some(app), None, &format!("tcpip:{}", args[1])).await
+        }
+        "usb" => run_adb_device_command(Some(app), None, "usb:").await,
+        "shell" => {
+            let cmd = args[1..].join(" ");
+            run_adb_device_command(Some(app), None, &format!("shell:{}", cmd)).await
+        }
+        "kill-server" => run_adb_host_command(Some(app), "host:kill").await,
+        "-s" if args.len() > 2 => {
+            let serial = &args[1];
+            let cmd_type = &args[2];
+            match cmd_type.as_str() {
+                "shell" => {
+                    let cmd = args[3..].join(" ");
+                    run_adb_device_command(Some(app), Some(serial), &format!("shell:{}", cmd)).await
+                }
+                "tcpip" if args.len() > 3 => {
+                    run_adb_device_command(Some(app), Some(serial), &format!("tcpip:{}", args[3]))
+                        .await
+                }
+                "usb" => run_adb_device_command(Some(app), Some(serial), "usb:").await,
+                _ => Err(format!("Unsupported device command with -s: {}", cmd_type)),
+            }
+        }
+        _ => Err(format!("Unsupported ADB command in wrapper: {}", args[0])),
+    }
+}
+
+fn format_ip_address(ip: &str) -> String {
+    if ip.contains(':') {
+        ip.to_string()
+    } else {
+        format!("{}:5555", ip)
+    }
+}
+
+fn get_device_serial_args(ip: &str) -> Vec<String> {
+    if ip.is_empty() {
+        vec![]
+    } else {
+        vec!["-s".to_string(), format_ip_address(ip)]
     }
 }
 
@@ -34,11 +65,7 @@ async fn run_adb_command(app: &AppHandle, args: &[String]) -> Result<String, Str
 pub async fn connect_device(app: AppHandle, ip: Option<String>) -> Result<String, String> {
     let args = match ip.as_deref().filter(|s| !s.trim().is_empty()) {
         Some(ip_addr) => {
-            let connection_str = if ip_addr.contains(':') {
-                ip_addr.to_string()
-            } else {
-                format!("{}:5555", ip_addr)
-            };
+            let connection_str = format_ip_address(ip_addr);
             vec!["connect".to_string(), connection_str]
         }
         None => vec!["devices".to_string()],
@@ -55,6 +82,11 @@ pub async fn enable_tcpip(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub async fn set_usb_mode(app: AppHandle) -> Result<String, String> {
     run_adb_command(&app, &vec!["usb".to_string()]).await
+}
+
+#[tauri::command]
+pub async fn disconnect_all_wireless(app: AppHandle) -> Result<String, String> {
+    run_adb_command(&app, &vec!["disconnect".to_string()]).await
 }
 
 #[tauri::command]
@@ -133,15 +165,14 @@ pub async fn start_keep_awake(
             interval.tick().await;
 
             // Check device status first (optional but safer)
-            let status_output = run_adb_command(
-                &app_handle_task,
-                &vec![
-                    "shell".to_string(),
-                    "dumpsys".to_string(),
-                    "power".to_string(),
-                ],
-            )
-            .await;
+            let mut status_args = get_device_serial_args(&config.ip_address);
+            status_args.extend_from_slice(&[
+                "shell".to_string(),
+                "dumpsys".to_string(),
+                "power".to_string(),
+            ]);
+
+            let status_output = run_adb_command(&app_handle_task, &status_args).await;
 
             let should_wake = match status_output {
                 Ok(output) => {
@@ -152,16 +183,15 @@ pub async fn start_keep_awake(
             };
 
             if should_wake {
-                let res = run_adb_command(
-                    &app_handle_task,
-                    &vec![
-                        "shell".to_string(),
-                        "input".to_string(),
-                        "keyevent".to_string(),
-                        "224".to_string(),
-                    ],
-                )
-                .await;
+                let mut wakeup_args = get_device_serial_args(&config.ip_address);
+                wakeup_args.extend_from_slice(&[
+                    "shell".to_string(),
+                    "input".to_string(),
+                    "keyevent".to_string(),
+                    "224".to_string(),
+                ]);
+
+                let res = run_adb_command(&app_handle_task, &wakeup_args).await;
 
                 if debug_mode.load(Ordering::Relaxed) {
                     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
@@ -212,18 +242,17 @@ pub async fn start_keep_awake(
                     format!("[{}] Executing auto-dim...", timestamp),
                 );
 
-                let _ = run_adb_command(
-                    &app_handle_dim,
-                    &vec![
-                        "shell".to_string(),
-                        "settings".to_string(),
-                        "put".to_string(),
-                        "system".to_string(),
-                        "screen_brightness".to_string(),
-                        "1".to_string(),
-                    ],
-                )
-                .await;
+                let mut dim_args = get_device_serial_args(&config.ip_address);
+                dim_args.extend_from_slice(&[
+                    "shell".to_string(),
+                    "settings".to_string(),
+                    "put".to_string(),
+                    "system".to_string(),
+                    "screen_brightness".to_string(),
+                    "1".to_string(),
+                ]);
+
+                let _ = run_adb_command(&app_handle_dim, &dim_args).await;
             }
         });
 
@@ -254,6 +283,30 @@ pub async fn stop_keep_awake(state: State<'_, AppState>) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn try_auto_connect(app: AppHandle, ip: String) -> Result<String, String> {
+    let connection_str = format_ip_address(&ip);
+
+    // Attempt adb connect
+    let connect_result =
+        run_adb_command(&app, &vec!["connect".to_string(), connection_str.clone()]).await;
+
+    match connect_result {
+        Ok(output) => {
+            // "already connected" or "connected to" means success
+            if output.contains("connected to") || output.contains("already connected") {
+                // Verify with adb devices
+                let devices = run_adb_command(&app, &vec!["devices".to_string()]).await?;
+                if devices.contains(&ip) && devices.contains("device") {
+                    return Ok(format!("connected to {}", connection_str));
+                }
+            }
+            Err(format!("Connection failed: {}", output.trim()))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 #[tauri::command]

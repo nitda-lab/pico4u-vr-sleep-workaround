@@ -8,6 +8,7 @@ pub struct AppState {
     pub dim_task: Mutex<Option<JoinHandle<()>>>,
     pub is_running: Arc<AtomicBool>,
     pub debug_mode: Arc<AtomicBool>,
+    pub adb_started_by_us: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
@@ -17,6 +18,7 @@ impl Default for AppState {
             dim_task: Mutex::new(None),
             is_running: Arc::new(AtomicBool::new(false)),
             debug_mode: Arc::new(AtomicBool::new(false)),
+            adb_started_by_us: Arc::new(AtomicBool::new(false)),
         }
     }
 }
