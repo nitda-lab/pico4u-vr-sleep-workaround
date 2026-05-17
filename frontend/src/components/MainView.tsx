@@ -23,6 +23,8 @@ export function MainView() {
     autoConnectStatus,
     setAutoConnectStatus,
     retryAutoConnect,
+    autoConnectType,
+    autoConnectAttempt,
     deviceIp,
   } = useAppContext()
 
@@ -163,9 +165,16 @@ export function MainView() {
                 <span className='w-8 h-8 border-3 border-gray-200 dark:border-gray-600 border-t-brand rounded-full animate-spin' />
                 <div>
                   <p className='text-sm font-semibold text-gray-700 dark:text-gray-300'>
-                    {t('auto_connect_connecting')}
+                    {autoConnectType === 'wired'
+                      ? t('auto_connect_wired', { attempt: autoConnectAttempt })
+                      : autoConnectType === 'wireless'
+                        ? t('auto_connect_wireless', {
+                            ip: deviceIp,
+                            attempt: autoConnectAttempt,
+                          })
+                        : t('auto_connect_wired', { attempt: autoConnectAttempt })}
                   </p>
-                  {deviceIp && (
+                  {deviceIp && autoConnectType === 'wireless' && (
                     <p className='mt-1 text-xs font-mono text-gray-400 dark:text-gray-500'>
                       {deviceIp}
                     </p>
