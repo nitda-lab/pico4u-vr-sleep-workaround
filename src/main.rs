@@ -22,7 +22,15 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .manage(state)
-        .setup(|_app| Ok(()))
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let config = crate::config::load_config(&handle);
+            if config.mic_drainer_enabled {
+                let state = handle.state::<AppState>();
+                crate::mic_drainer::start(handle.clone(), &state);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             connect_device,
             enable_tcpip,
@@ -37,13 +45,15 @@ fn main() {
             disconnect_all_wireless,
             get_device_model,
             get_config,
-            save_config_cmd
+            save_config_cmd,
+            set_mic_drainer_enabled
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| match event {
             tauri::RunEvent::Exit => {
                 let state = app_handle.state::<AppState>();
+                crate::mic_drainer::stop(&state);
                 if state.adb_started_by_us.load(Ordering::SeqCst) {
                     if let Ok(sidecar) = app_handle.shell().sidecar("adb") {
                         let _ = tauri::async_runtime::block_on(async {
