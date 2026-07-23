@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub ip_address: String,
     pub keep_awake_interval_secs: u64,
     pub last_connection_mode: Option<String>,
+    pub mic_drainer_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -19,6 +20,7 @@ impl Default for AppConfig {
             ip_address: String::new(),
             keep_awake_interval_secs: 3,
             last_connection_mode: None,
+            mic_drainer_enabled: true,
         }
     }
 }
