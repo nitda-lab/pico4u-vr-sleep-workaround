@@ -54,6 +54,10 @@ const resources = {
       log_started_loop: 'Sleep prevention started (sending wake signal every {{interval}}s).',
       error_prefix: 'Error: {{error}}',
       debug_mode: 'Debug Mode (Show event log)',
+      log_wireless_already:
+        'Already connected wirelessly — setup is not needed. (USB ADB is disabled while the headset is in wireless ADB mode.)',
+      log_no_usb_device:
+        'No USB ADB device found. Check the USB cable and accept the USB debugging prompt on the headset, or reboot the headset and try again.',
       mic_drainer_title: 'Mic Delay Fix',
       mic_drainer_status_draining: 'Draining',
       mic_drainer_status_waiting: 'Waiting (device not found)',
@@ -161,6 +165,10 @@ const resources = {
       log_started_loop: 'スリープ回避を開始しました（{{interval}}秒間隔で信号を送信）',
       error_prefix: 'エラー: {{error}}',
       debug_mode: 'デバッグモード（イベントログを表示）',
+      log_wireless_already:
+        '既に無線接続済みのため、セットアップは不要です。（無線ADBモード中はUSB側のADBが無効になります）',
+      log_no_usb_device:
+        'USB接続のADBデバイスが見つかりません。ケーブルとヘッドセット側のUSBデバッグ許可を確認するか、ヘッドセットを再起動してから再試行してください。',
       mic_drainer_title: 'マイク遅延対策',
       mic_drainer_status_draining: '排水中',
       mic_drainer_status_waiting: '待機中（デバイス未検出）',

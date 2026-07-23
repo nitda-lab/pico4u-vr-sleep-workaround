@@ -352,10 +352,24 @@ export function useAppLogic() {
       await checkDevices()
       return true
     } catch (e) {
+      const msg = String(e)
+      if (msg.includes('ALREADY_WIRELESS')) {
+        // 既に無線接続済み（adbd が TCP モードで USB の ADB は無効）。
+        // セットアップは不要なので、接続状態を確認して通常表示に戻す。
+        addLog(t('log_wireless_already'))
+        setWirelessSetupStatus('idle')
+        await checkDevices()
+        return true
+      }
+      if (msg.includes('NO_USB_DEVICE')) {
+        addLog(t('log_no_usb_device'))
+        setWirelessSetupStatus('error')
+        return false
+      }
       addLog(t('log_wireless_error', { error: e }))
       addLog(t('log_wireless_note'))
       setWirelessSetupStatus('error')
-      updateDeviceIp('')
+      // 注: ここで保存済み IP は消さない（消すと自動再接続まで壊れるため）
       return false
     }
   }, [t, addLog, checkDevices, updateDeviceIp])

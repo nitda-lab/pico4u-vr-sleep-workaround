@@ -45,6 +45,35 @@ async fn run_adb_command(app: &AppHandle, args: &[String]) -> Result<String, Str
     }
 }
 
+/// `host:devices` の出力から USB 接続のシリアル（IP/ポートを含まないもの）を探す。
+/// adbd が TCP モードのときは USB の ADB が無効になるため、見つからないことがある。
+fn find_usb_serial(devices_output: &str) -> Option<String> {
+    devices_output.lines().find_map(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("List of devices attached") {
+            return None;
+        }
+        let mut parts = trimmed.split('\t');
+        let serial = parts.next()?;
+        let state = parts.next()?;
+        if state != "device" || serial.contains('.') || serial.contains(':') {
+            return None;
+        }
+        Some(serial.to_string())
+    })
+}
+
+/// `host:devices` の出力に接続済みの無線（TCP）デバイスが含まれるか。
+fn has_wireless_device(devices_output: &str) -> bool {
+    devices_output.lines().any(|line| {
+        let mut parts = line.trim().split('\t');
+        matches!(
+            (parts.next(), parts.next()),
+            (Some(serial), Some("device")) if serial.contains(':') || serial.contains('.')
+        )
+    })
+}
+
 fn format_ip_address(ip: &str) -> String {
     if ip.contains(':') {
         ip.to_string()
@@ -76,7 +105,29 @@ pub async fn connect_device(app: AppHandle, ip: Option<String>) -> Result<String
 
 #[tauri::command]
 pub async fn enable_tcpip(app: AppHandle) -> Result<String, String> {
-    run_adb_command(&app, &vec!["tcpip".to_string(), "5555".to_string()]).await
+    // tcpip は必ず USB デバイスに対して実行する。
+    // デバイス未指定(transport-any)だと、既存の無線接続しか無い場合に
+    // その無線経由で adbd が再起動されて接続が切れてしまう。
+    let devices = run_adb_command(&app, &vec!["devices".to_string()]).await?;
+    match find_usb_serial(&devices) {
+        Some(serial) => {
+            run_adb_command(
+                &app,
+                &vec![
+                    "-s".to_string(),
+                    serial,
+                    "tcpip".to_string(),
+                    "5555".to_string(),
+                ],
+            )
+            .await
+        }
+        None if has_wireless_device(&devices) => {
+            // USB の ADB は無いが無線接続は生きている＝セットアップ済み
+            Err("ALREADY_WIRELESS".to_string())
+        }
+        None => Err("NO_USB_DEVICE".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -353,6 +404,46 @@ pub async fn get_config(app: AppHandle) -> Result<AppConfig, String> {
 #[tauri::command]
 pub async fn save_config_cmd(app: AppHandle, config: AppConfig) -> Result<(), String> {
     save_config(&app, &config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 実際の障害ケース: adbd が TCP モードで無線接続のみが見える状態
+    const WIRELESS_ONLY: &str = "192.168.0.196:5555\tdevice\n";
+    const USB_ONLY: &str = "PA8250MGL1234567\tdevice\n";
+    const BOTH: &str = "192.168.0.196:5555\tdevice\nPA8250MGL1234567\tdevice\n";
+    const WITH_HEADER: &str =
+        "List of devices attached\nPA8250MGL1234567\tdevice\n192.168.0.196:5555\tdevice\n";
+    const UNAUTHORIZED: &str = "PA8250MGL1234567\tunauthorized\n";
+    const EMPTY: &str = "";
+
+    #[test]
+    fn usb_serial_found_when_usb_present() {
+        assert_eq!(find_usb_serial(USB_ONLY), Some("PA8250MGL1234567".into()));
+        assert_eq!(find_usb_serial(BOTH), Some("PA8250MGL1234567".into()));
+        assert_eq!(
+            find_usb_serial(WITH_HEADER),
+            Some("PA8250MGL1234567".into())
+        );
+    }
+
+    #[test]
+    fn usb_serial_absent_when_wireless_only() {
+        // これが今回のバグの前提条件: 無線のみのとき tcpip を実行してはいけない
+        assert_eq!(find_usb_serial(WIRELESS_ONLY), None);
+        assert_eq!(find_usb_serial(EMPTY), None);
+        assert_eq!(find_usb_serial(UNAUTHORIZED), None);
+    }
+
+    #[test]
+    fn wireless_detection() {
+        assert!(has_wireless_device(WIRELESS_ONLY));
+        assert!(has_wireless_device(BOTH));
+        assert!(!has_wireless_device(USB_ONLY));
+        assert!(!has_wireless_device(EMPTY));
+    }
 }
 
 #[tauri::command]
