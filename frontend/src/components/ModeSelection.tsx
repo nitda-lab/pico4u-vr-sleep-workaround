@@ -2,6 +2,7 @@ import { Button, Icon } from '@charcoal-ui/react'
 import packageJson from '../../package.json'
 import { useAppContext } from '../context/AppContext'
 import { Settings } from './Settings'
+import { MicDrainerPanel } from './MicDrainerPanel'
 
 interface ModeSelectionProps {
   homeView: 'main' | 'settings'
@@ -28,7 +29,7 @@ export function ModeSelection({ homeView, setHomeView, setCheckingMode }: ModeSe
 
       {homeView === 'main' ? (
         <>
-          <div className='flex-1 flex flex-col items-center justify-center px-5'>
+          <div className='flex-1 flex flex-col items-center justify-center gap-4 px-5'>
             <div className='bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 w-full max-w-sm text-center'>
               <h2 className='mt-0 mb-5 text-base font-bold text-gray-900 dark:text-gray-100'>
                 {t('mode_select_title')}
@@ -42,6 +43,8 @@ export function ModeSelection({ homeView, setHomeView, setCheckingMode }: ModeSe
                 </Button>
               </div>
             </div>
+
+            <MicDrainerPanel />
           </div>
 
           {/* Settings link */}
