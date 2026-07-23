@@ -6,6 +6,7 @@ import packageJson from '../../package.json'
 import { DeviceChecking } from './DeviceChecking'
 import { ModeSelection } from './ModeSelection'
 import { ConnectionPanel } from './ConnectionPanel'
+import { MicDrainerPanel } from './MicDrainerPanel'
 
 type Tab = 'connection' | 'logs' | 'settings'
 type HomeView = 'main' | 'settings'
@@ -330,13 +331,13 @@ export function MainView() {
 
       {/* Tab content */}
       <div className='flex-1 overflow-y-auto px-5 pt-4 pb-5'>
-        {isDebug ? (
-          <>
-            {currentTab === 'connection' && <ConnectionPanel />}
-            {currentTab === 'logs' && <Logs />}
-          </>
+        {isDebug && currentTab === 'logs' ? (
+          <Logs />
         ) : (
-          <ConnectionPanel />
+          <div className='flex flex-col gap-4'>
+            <ConnectionPanel />
+            <MicDrainerPanel />
+          </div>
         )}
       </div>
     </div>
