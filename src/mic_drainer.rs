@@ -38,7 +38,9 @@ pub fn start(app: AppHandle, state: &AppState) {
 
     let enabled = state.mic_drainer_enabled.clone();
 
-    let task = tokio::spawn(async move {
+    // setup() フック（Tokio ランタイム未エントリ）からも呼ばれるため、
+    // ランタイムコンテキストに依存しない tauri::async_runtime::spawn を使う。
+    let task = tauri::async_runtime::spawn(async move {
         supervisor_loop(app, enabled).await;
     });
 

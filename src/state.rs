@@ -9,7 +9,7 @@ pub struct AppState {
     pub is_running: Arc<AtomicBool>,
     pub debug_mode: Arc<AtomicBool>,
     pub adb_started_by_us: Arc<AtomicBool>,
-    pub mic_drainer_task: Mutex<Option<JoinHandle<()>>>,
+    pub mic_drainer_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     pub mic_drainer_enabled: Arc<AtomicBool>,
 }
 
