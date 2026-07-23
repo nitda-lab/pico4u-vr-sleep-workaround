@@ -32,6 +32,9 @@ export function useAppLogic() {
   >('idle')
   const [dimAfterHours, setDimAfterHours] = useState<number>(0)
   const [keepAwakeInterval, setKeepAwakeInterval] = useState<number>(3)
+  const [micDrainerEnabled, setMicDrainerEnabled] = useState<boolean>(true)
+  const [micDrainerStatus, setMicDrainerStatus] = useState<'draining' | 'waiting' | 'off'>('off')
+  const [micDrainerPeak, setMicDrainerPeak] = useState<number>(0)
   const { theme, setTheme } = useTheme()
 
   // Auto-connect state: 'idle' = not tried yet, 'connecting' = in progress,
@@ -66,12 +69,14 @@ export function useAppLogic() {
           ip_address: string
           keep_awake_interval_secs: number
           last_connection_mode: 'wired' | 'wireless' | null
+          mic_drainer_enabled: boolean
         }>('get_config')
 
         if (cancelled) return
 
         setDimAfterHours(config.dim_delay_hours)
         setKeepAwakeInterval(config.keep_awake_interval_secs)
+        setMicDrainerEnabled(config.mic_drainer_enabled)
 
         const savedIp = config.ip_address
         if (savedIp) {
@@ -210,6 +215,27 @@ export function useAppLogic() {
       })
     }
   }, [addLog])
+
+  // Mic drainer status / peak listeners
+  useEffect(() => {
+    const statusPromise = listen<string>('mic-drainer-status', (event) => {
+      const v = event.payload
+      if (v === 'draining' || v === 'waiting' || v === 'off') {
+        setMicDrainerStatus(v)
+      }
+    }).catch(() => () => {})
+
+    const peakPromise = listen<number>('mic-drainer-peak', (event) => {
+      if (typeof event.payload === 'number') {
+        setMicDrainerPeak(event.payload)
+      }
+    }).catch(() => () => {})
+
+    return () => {
+      statusPromise.then((fn) => fn && fn())
+      peakPromise.then((fn) => fn && fn())
+    }
+  }, [])
 
   const changeLanguage = useCallback(
     (lang: string) => {
@@ -368,6 +394,15 @@ export function useAppLogic() {
     }
   }, [isRunning, connectionMode, t, addLog])
 
+  const toggleMicDrainer = useCallback(async (enabled: boolean) => {
+    setMicDrainerEnabled(enabled)
+    try {
+      await invoke('set_mic_drainer_enabled', { enabled })
+    } catch (e) {
+      console.error('Failed to toggle mic drainer:', e)
+    }
+  }, [])
+
   const getDeviceModel = useCallback(async () => {
     try {
       return await invoke<string>('get_device_model')
@@ -456,5 +491,9 @@ export function useAppLogic() {
     autoConnectType,
     autoConnectAttempt,
     retryAutoConnect,
+    micDrainerEnabled,
+    micDrainerStatus,
+    micDrainerPeak,
+    toggleMicDrainer,
   }
 }
