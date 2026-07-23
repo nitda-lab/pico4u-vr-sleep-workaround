@@ -6,6 +6,7 @@
 mod adb_client;
 mod commands;
 mod config;
+mod mic_drainer;
 mod state;
 
 use crate::commands::*;
