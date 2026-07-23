@@ -354,3 +354,24 @@ pub async fn get_config(app: AppHandle) -> Result<AppConfig, String> {
 pub async fn save_config_cmd(app: AppHandle, config: AppConfig) -> Result<(), String> {
     save_config(&app, &config)
 }
+
+#[tauri::command]
+pub async fn set_mic_drainer_enabled(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    // 設定を永続化
+    let mut config = load_config(&app);
+    config.mic_drainer_enabled = enabled;
+    save_config(&app, &config)?;
+
+    // 稼働状態を反映
+    if enabled {
+        crate::mic_drainer::start(app.clone(), &state);
+    } else {
+        crate::mic_drainer::stop(&state);
+    }
+
+    Ok(())
+}
