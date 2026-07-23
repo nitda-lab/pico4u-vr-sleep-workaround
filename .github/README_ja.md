@@ -36,3 +36,13 @@ pico4u-vr-sleep-workaroundは、開発時や特定の用途において、Pico 4
 ## 👨‍💻 For Developers / 開発者向け
 
 開発環境のセットアップ、ソースからのビルド方法、およびプロジェクトへの貢献に関する詳細は、[CONTRIBUTING.md](../CONTRIBUTING.md) を参照してください。
+
+## マイク遅延対策（Mic Delay Fix）
+
+Pico 4 / 4 Ultra を Pico Connect 経由で PC の VRChat 等と使うと、仮想マイク `PicoStreamingMicrophone` のバッファ滞留により、時間とともにマイク遅延が累積することがあります。本アプリはこのデバイスの音声ストリームを常時開いてデータを読み捨てることで、遅延の蓄積を防ぎます。ホーム画面のトグルで ON/OFF できます（デフォルト ON、Pico Connect 起動中のみ動作）。
+
+この機能の仕組みは [PicoMicDrainer](https://github.com/nezumi-tech/PicoMicDrainer)（nezumi-tech, MIT ライセンス）を参考に Rust で再実装したものです。
+
+---
+
+本リポジトリは [ryium/pico4u-vr-sleep-workaround](https://github.com/ryium/pico4u-vr-sleep-workaround)（MIT ライセンス）の非公式フォークです。

@@ -36,3 +36,13 @@ Before using the tool, you must enable Developer Mode and USB Debugging on your 
 ## 👨‍💻 For Developers
 
 For information on how to set up the development environment, build the app from source, and contribute to the project, please refer to the [CONTRIBUTING.md](./CONTRIBUTING.md) guide.
+
+## Mic Delay Fix
+
+When using the Pico 4 / 4 Ultra with PC VRChat (and similar apps) over Pico Connect, buffered audio in the virtual `PicoStreamingMicrophone` device can accumulate, causing microphone latency that grows over time. This app continuously opens that device's audio stream and discards the data, preventing the delay from building up. It can be toggled on/off from the home screen (on by default; active only while Pico Connect is running).
+
+The mechanism is a Rust reimplementation of the approach used by [PicoMicDrainer](https://github.com/nezumi-tech/PicoMicDrainer) (nezumi-tech, MIT License).
+
+---
+
+This repository is an unofficial fork of [ryium/pico4u-vr-sleep-workaround](https://github.com/ryium/pico4u-vr-sleep-workaround) (MIT License).
