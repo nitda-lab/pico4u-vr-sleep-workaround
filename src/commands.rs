@@ -208,9 +208,13 @@ pub async fn start_keep_awake(
     let config = load_config(&app_handle);
     let interval_secs = config.keep_awake_interval_secs;
 
+    // 接続断を通知するまでの連続失敗回数
+    const FAILURE_NOTIFY_THRESHOLD: u32 = 3;
+
     // Main Keep-Awake Task
     let task = tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(interval_secs));
+        let mut consecutive_failures: u32 = 0;
 
         while is_running.load(Ordering::Relaxed) {
             interval.tick().await;
@@ -223,7 +227,25 @@ pub async fn start_keep_awake(
                 "power".to_string(),
             ]);
 
-            let status_output = run_adb_command(&app_handle_task, &status_args).await;
+            let mut status_output = run_adb_command(&app_handle_task, &status_args).await;
+
+            // 無線接続が切れていたら adb connect で繋ぎ直してから再確認する。
+            // ADB は TCP 接続を自動復旧しないため、これが無いと一度の瞬断で
+            // ループが沈黙したままヘッドセットがスリープしてしまう。
+            if status_output.is_err() && !config.ip_address.is_empty() {
+                let _ = run_adb_command(
+                    &app_handle_task,
+                    &vec![
+                        "connect".to_string(),
+                        format_ip_address(&config.ip_address),
+                    ],
+                )
+                .await;
+                status_output = run_adb_command(&app_handle_task, &status_args).await;
+            }
+
+            // このtickでデバイスに到達できたか（接続断の検知に使う）
+            let mut device_reachable = status_output.is_ok();
 
             let should_wake = match status_output {
                 Ok(output) => {
@@ -244,6 +266,10 @@ pub async fn start_keep_awake(
 
                 let res = run_adb_command(&app_handle_task, &wakeup_args).await;
 
+                if res.is_ok() {
+                    device_reachable = true;
+                }
+
                 if debug_mode.load(Ordering::Relaxed) {
                     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
                     match res {
@@ -263,6 +289,33 @@ pub async fn start_keep_awake(
                     "debug-log",
                     format!("[{}] Device is already awake, skipping", timestamp),
                 );
+            }
+
+            // 接続断の検知と復帰の通知（デバッグモードに関わらずログに残す）
+            if device_reachable {
+                if consecutive_failures >= FAILURE_NOTIFY_THRESHOLD {
+                    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+                    let _ = app_handle_task.emit(
+                        "debug-log",
+                        format!(
+                            "[{}] Reconnected to the headset. Keep-awake resumed.",
+                            timestamp
+                        ),
+                    );
+                }
+                consecutive_failures = 0;
+            } else {
+                consecutive_failures += 1;
+                if consecutive_failures == FAILURE_NOTIFY_THRESHOLD {
+                    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+                    let _ = app_handle_task.emit(
+                        "debug-log",
+                        format!(
+                            "[{}] Lost connection to the headset. Reconnecting every {}s...",
+                            timestamp, interval_secs
+                        ),
+                    );
+                }
             }
         }
     });
